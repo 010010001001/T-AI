@@ -1,3 +1,0 @@
-// sympy_engine.dll
-int sympy_validate(const char* expr_utf8, char** normalized, char** error);
-int sympy_execute(const char* expr_utf8, char** result_utf8, char** proof_utf8, char** error);

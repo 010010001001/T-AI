@@ -1,0 +1,13 @@
+// 返回 0 成功，非 0 为错误码
+typedef int (*token_cb)(const char* token_utf8, void* user_data);
+
+int ai_generate(
+    const char* prompt_utf8,
+    const char* params_json,      // {"max_tokens":512,"temperature":0.7,"ctx":4096}
+    token_cb cb,
+    void* user_data,
+    char** error_json             // 失败时由调用方 ai_free_string 释放
+);
+
+void ai_free_string(char* s);
+int ai_backend_init(const char* backends_dir_utf8);

@@ -40,7 +40,8 @@ public sealed class ToolPermissionManager : IDisposable
     private static readonly Dictionary<string, string> DisplayNames = new(StringComparer.OrdinalIgnoreCase)
     {
         ["image_ocr"] = "图像识别（Windows OCR）",
-        ["speech_asr"] = "语音识别（Windows SAPI）"
+        ["speech_asr"] = "语音识别（Windows SAPI）",
+        ["web_search"] = "联网搜索（Bing）"
     };
 
     public ToolPermissionManager(string permissionsPath)
@@ -198,6 +199,12 @@ public sealed class ToolPermissionManager : IDisposable
         if (s.Length == 0) return false;
 
         if (s.Contains("权限状态") || s == "权限") { Console.WriteLine(Describe()); return true; }
+
+        if (s.Contains("联网") || s.Contains("网络") || s.Contains("上网") || s.Contains("搜索权限"))
+        {
+            if (s.Contains("关闭") || s.Contains("禁用")) return Close("web_search");
+            if (s.Contains("保持") || s.Contains("开启") || s.Contains("允许")) return Keep("web_search");
+        }
 
         if (s.Contains("图像") || s.Contains("图片") || s.Contains("OCR") || s.Contains("ocr"))
         {

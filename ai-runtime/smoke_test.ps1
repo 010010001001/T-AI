@@ -134,8 +134,8 @@ Assert-True ($symOut -notmatch 'llm_candidate_value=16.*accepted_value=16.*sourc
 # ---------- 3. TOOL 路由 ----------
 Write-Host "`n=== 3. TOOL 路由 ===" -ForegroundColor Cyan
 $toolLog = Join-Path $LogDir "03_tool.log"
-# 触发工具调用；插件目录中须存在一个提供 "echo" 功能的示例插件
-$toolPrompt = "搜索一下今天家具行业的新闻"
+# 触发本地 C ABI 插件回显；不依赖联网搜索权限
+$toolPrompt = "请用 echo 工具回显一条测试消息，不要联网"
 $toolOut = & $exePath --smoke chat --input $toolPrompt 2>&1 | Tee-Object -FilePath $toolLog
 $toolRc = $LASTEXITCODE
 

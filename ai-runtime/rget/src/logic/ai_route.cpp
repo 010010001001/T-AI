@@ -19,29 +19,31 @@ static bool contains_any(std::string_view text, const std::vector<std::string>& 
     return false;
 }
 
-/* 数字-运算符-数字 才算数学信号；避免把日期 "2026-11-08" 之外的 '-'、
- * 文件名中的 '.' 等误判为运算。 */
+/* 数字/变量-运算符-数字/变量 才算数学信号；同时识别不等式比较符。 */
 static bool has_math_operator(std::string_view text)
 {
-    static const char kOps[] = "+-*/^=";
+    static const char kOps[] = "+-*/^=<>";
 
-    for (size_t i = 1; i + 1 < text.size(); ++i)
+    for (size_t i = 0; i + 1 < text.size(); ++i)
     {
         char c = text[i];
         if (!std::string_view(kOps).find(c)) continue;
 
-        // 运算符右侧跳过空白后必须是数字或 '('
+        // 运算符右侧跳过空白后必须是数字、变量 x、括号
         size_t j = i + 1;
         while (j < text.size() && (text[j] == ' ' || text[j] == '\t')) ++j;
         bool right = j < text.size() && (std::isdigit(static_cast<unsigned char>(text[j])) ||
-                                         text[j] == '(' || text[j] == '-');
+                                         text[j] == '(' || text[j] == '[' ||
+                                         text[j] == 'x' || text[j] == 'X' ||
+                                         (text[j] == '-' && j + 1 < text.size()));
         if (!right) continue;
 
-        // 左侧跳过空白后必须是数字、')' 或 'x'
+        // 左侧跳过空白后必须是数字、变量 x、')' 或 ']'
         size_t k = i;
         while (k > 0 && (text[k - 1] == ' ' || text[k - 1] == '\t')) --k;
         bool left = k > 0 && (std::isdigit(static_cast<unsigned char>(text[k - 1])) ||
-                              text[k - 1] == ')' || text[k - 1] == 'x');
+                              text[k - 1] == 'x' || text[k - 1] == 'X' ||
+                              text[k - 1] == ')' || text[k - 1] == ']');
         if (left) return true;
     }
     return false;

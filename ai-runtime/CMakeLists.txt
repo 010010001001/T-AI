@@ -42,13 +42,10 @@ endif()
 # ---------------------------------------------------------------------------
 # sympy_engine：优先源码构建；源码缺失时使用 prebuilt 导入库
 # ---------------------------------------------------------------------------
-set(SYMPY_DISPATCH "${AI_RUNTIME_ROOT}/封装/generated/sympy_engine_dispatch.c")
-set(SYMPY_TEMPLATES "${AI_RUNTIME_ROOT}/封装/generated/sympy_templates.c")
+set(SYMPY_DISPATCH "${AI_RUNTIME_ROOT}/封装/generated/sympy_engine.cpp")
 
-if(EXISTS "${SYMPY_DISPATCH}" AND EXISTS "${SYMPY_TEMPLATES}")
-    add_library(sympy_engine SHARED
-        "${SYMPY_DISPATCH}"
-        "${SYMPY_TEMPLATES}")
+if(EXISTS "${SYMPY_DISPATCH}")
+    add_library(sympy_engine SHARED "${SYMPY_DISPATCH}")
     target_include_directories(sympy_engine PRIVATE "${AI_RUNTIME_INCLUDE_DIR}")
     target_compile_definitions(sympy_engine PRIVATE SYMPY_ENGINE_EXPORTS)
     set_target_properties(sympy_engine PROPERTIES OUTPUT_NAME sympy_engine)

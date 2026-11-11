@@ -206,6 +206,27 @@ public sealed class ConversationOrchestrator
 
         ToolCall? call = await GenerateToolCallAsync(question, ct).ConfigureAwait(false);
 
+        // echo 回显是本地 ABI 插件的稳定性测试，不依赖联网工具
+        if (question.Contains("回显", StringComparison.Ordinal) &&
+            _plugins.Plugins.FirstOrDefault(p =>
+                p.Descriptor.Functions.Contains("echo", StringComparer.OrdinalIgnoreCase)) is { } echoPlugin)
+        {
+            string echoResult;
+            try
+            {
+                echoResult = echoPlugin.Execute(JsonSerializer.Serialize(new { query = question }));
+                Trace("plugin_execute_rc=0");
+            }
+            catch (Exception ex)
+            {
+                Trace("plugin_execute_rc=1");
+                return $"工具执行失败：{ex.Message}";
+            }
+            Trace($"tool_call={echoPlugin.Name}.echo");
+            Trace("executed_by=csharp");
+            return await FormatToolResultAsync(question, echoResult, ct).ConfigureAwait(false);
+        }
+
         // 模型没给出有效调用时，用确定性规则兜底（图片路径 / 语音关键词）
         if (call is null || string.IsNullOrWhiteSpace(call.Plugin) || string.IsNullOrWhiteSpace(call.Function))
         {
@@ -297,7 +318,7 @@ public sealed class ConversationOrchestrator
         IManagedTool tool, string function, string argsJson, string question, CancellationToken ct)
     {
         if (tool.RequiresPermission && !_permissions.EnsureAllowed(tool.Name))
-            return "该能力需要用户授权，本次已取消。你可以说“保持图像权限”或“保持语音权限”后再试。";
+            return "该能力需要用户授权，本次已取消。你可以说“保持图像权限”“保持语音权限”或“保持联网权限”后再试。";
 
         string result;
         try
@@ -322,7 +343,44 @@ public sealed class ConversationOrchestrator
         if (tool.Name.StartsWith("workspace_", StringComparison.OrdinalIgnoreCase))
             return FormatWorkspaceResult(tool.Name, result);
 
+        // 联网搜索即使模型不可用，也给出可读的搜索结果
+        if (tool.Name.Equals("web_search", StringComparison.OrdinalIgnoreCase))
+            return FormatWebSearchResult(result);
+
         return await FormatToolResultAsync(question, result, ct).ConfigureAwait(false);
+    }
+
+    private static string FormatWebSearchResult(string resultJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(resultJson);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("error", out var err))
+                return "搜索失败：" + (err.GetString() ?? "未知错误");
+
+            if (!root.TryGetProperty("results", out var results) ||
+                results.ValueKind != JsonValueKind.Array)
+                return resultJson;
+
+            var sb = new StringBuilder("搜索结果：");
+            int index = 0;
+            foreach (var item in results.EnumerateArray())
+            {
+                if (++index > 5) break;
+                string title = item.TryGetProperty("title", out var t) ? t.GetString() ?? "" : "";
+                string url = item.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
+                string snippet = item.TryGetProperty("snippet", out var s) ? s.GetString() ?? "" : "";
+
+                sb.Append($"\n{index}. {title}\n   {url}");
+                if (snippet.Length > 0) sb.Append($"\n   {snippet}");
+            }
+            return sb.ToString();
+        }
+        catch (JsonException)
+        {
+            return resultJson;
+        }
     }
 
     private static string FormatWorkspaceResult(string toolName, string resultJson)
@@ -390,6 +448,28 @@ public sealed class ConversationOrchestrator
     {
         tool = _managedTools.FirstOrDefault(t => t.Name == "image_ocr");
         function = "ocr";
+
+        // 明确的联网搜索指令直接走 web_search（权限仍由 PermissionManager 守门）
+        if (question.Contains("联网搜索") || question.Contains("网上搜索") ||
+            question.Contains("网络搜索") || question.Contains("上网搜索"))
+        {
+            var web = _managedTools.FirstOrDefault(t => t.Name == "web_search");
+            if (web is not null)
+            {
+                string query = question
+                    .Replace("联网搜索", "", StringComparison.Ordinal)
+                    .Replace("网上搜索", "", StringComparison.Ordinal)
+                    .Replace("网络搜索", "", StringComparison.Ordinal)
+                    .Replace("上网搜索", "", StringComparison.Ordinal)
+                    .Trim().Trim('：', ':', ' ');
+                if (query.Length == 0) query = question;
+                tool = web;
+                function = "search";
+                argsJson = JsonSerializer.Serialize(new { query, count = 5 });
+                return true;
+            }
+        }
+
         if (tool is not null)
         {
             var match = System.Text.RegularExpressions.Regex.Match(
@@ -443,15 +523,23 @@ public sealed class ConversationOrchestrator
         catalogLines.AddRange(_plugins.Plugins.Select(p =>
             $"- {p.Descriptor.Name}: {string.Join(", ", p.Descriptor.Functions)}"));
         catalogLines.AddRange(_managedTools.Select(t =>
-            $"- {t.Name}: {string.Join(", ", t.Functions)}" + t.Name switch
+        {
+            string line = $"- {t.Name}: {string.Join(", ", t.Functions)}" + t.Name switch
             {
                 "image_ocr" => "，args 需要 {\"path\":\"图片文件路径\"}",
                 "speech_asr" => "，args 可为 {\"language\":\"zh-CN\",\"timeout_ms\":10000}",
+                "web_search" => "，search 的 args 为 {\"query\":\"...\",\"count\":5}（仅明确“联网搜索”时使用）",
                 "workspace_files" => "，list/read 的 args 为 {\"path\":\".\"}",
                 "workspace_edit" => "，write 的 args 为 {\"path\":\"...\",\"content\":\"...\"}（需要权限 2；写文件必须选它，不要用 echo）",
                 "workspace_run" => "，run 的 args 为 {\"command\":\"...\",\"timeout_ms\":60000}（需要权限 3；执行命令/程序时必须选它）",
                 _ => string.Empty
-            }));
+            };
+
+            if (t.Name == "web_search" && !_permissions.IsEnabled("web_search"))
+                line += "（当前未授权，禁止选择）";
+
+            return line;
+        }));
         catalogLines.Add("- 注意：echo 仅用于回显测试，不能写文件、不能执行命令。");
         string catalog = string.Join("\n", catalogLines);
 
@@ -468,7 +556,9 @@ public sealed class ConversationOrchestrator
         string prompt =
             "根据可用工具，把用户问题转成一次工具调用。只输出 JSON，不要解释。\n" +
             "plugin 和 function 必须从下面的清单中原样选择，不能自造名称。\n" +
-            "选择规则：搜索/查询/检索内容 → echo.search；写文件 → workspace_edit.write；" +
+            "选择规则：普通搜索/查询/检索内容 → echo.search；只有明确说“联网搜索/网上搜索”才算 web_search.search；" +
+            "回显测试 → echo.echo；" +
+            "写文件 → workspace_edit.write；" +
             "执行命令/程序 → workspace_run.run；识别图片 → image_ocr.ocr；语音 → speech_asr.recognize。\n" +
             $"格式示例：{example}\n" +
             "可用工具：\n" + catalog + "\n" +

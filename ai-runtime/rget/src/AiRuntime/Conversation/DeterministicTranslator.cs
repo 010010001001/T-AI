@@ -22,6 +22,9 @@ public static class DeterministicTranslator
     private static readonly Regex PureExpression = new(
         @"^[\s0-9\.\+\-\*/\(\)]+$", RegexOptions.Compiled);
 
+    private static readonly Regex SymbolicExpression = new(
+        @"^[\s0-9xX\.\+\-\*/^\(\)\[\]<>=,]+$", RegexOptions.Compiled);
+
     private static readonly Dictionary<char, int> ChineseDigits = new()
     {
         ['零'] = 0, ['〇'] = 0, ['一'] = 1, ['二'] = 2, ['两'] = 2,
@@ -44,6 +47,14 @@ public static class DeterministicTranslator
         if (string.IsNullOrWhiteSpace(text)) return false;
 
         string trimmed = text.Trim();
+
+        // 方程/不等式/区间/含变量表达式：去中文提示词后原样交给符号引擎
+        if (TryExtractSymbolic(trimmed, out string symbolic))
+        {
+            expression = symbolic;
+            return true;
+        }
+
         if (PureExpression.IsMatch(trimmed))
         {
             string compact = Regex.Replace(trimmed, @"\s+", "");
@@ -81,6 +92,40 @@ public static class DeterministicTranslator
     {
         var t = Tokenize(text);
         return t.Count + ":" + string.Join("|", t);
+    }
+
+    /// <summary>去掉“解不等式/求解/计算”等中文前缀，并规范化隐式乘法。</summary>
+    private static bool TryExtractSymbolic(string text, out string expression)
+    {
+        expression = string.Empty;
+        string s = text;
+
+        foreach (string prefix in new[]
+                 {
+                     "解不等式", "解方程", "求解", "计算", "化简", "解", "求"
+                 })
+        {
+            if (s.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                s = s[prefix.Length..].Trim();
+                break;
+            }
+        }
+
+        if (s.Length == 0) return false;
+        if (!SymbolicExpression.IsMatch(s)) return false;
+        if (!s.Any(char.IsDigit) && !s.Contains('x', StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        // 2x -> 2*x，2( -> 2*(，)( -> )*(
+        s = Regex.Replace(s, @"(?<=[0-9\)\]])\s*(?=[xX\(])", "*", RegexOptions.IgnoreCase);
+
+        bool hasOperator = s.IndexOfAny(new[] { '+', '-', '*', '/', '^', '<', '>', '=' }) >= 0;
+        bool looksLikeInterval = s.Contains('[') || s.Contains(']') || s.Contains(',');
+        if (!hasOperator && !looksLikeInterval) return false;
+
+        expression = s;
+        return true;
     }
 
     /// <summary>

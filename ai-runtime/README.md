@@ -102,7 +102,10 @@ pwsh -File .\staging\ai-runtime-windows-x64\smoke_test.ps1 `
   - 工具路由：聊天中给出图片路径可触发 OCR，并返回识别文字；
   - 权限：关闭后非交互调用被拒绝（exit 3），保持后跨进程生效，超 30 分钟状态自动转为关闭；
   - 跨天持久化：新会话写入后在新进程恢复，问"我叫什么名字"能答出上一轮内容；
-  - 按序号/时间戳恢复：`--restore-session 2`、`--restore-session 19:34` 均命中正确会话。
+  - 按序号/时间戳恢复：`--restore-session 2`、`--restore-session 19:34` 均命中正确会话；
+  - 联网搜索：默认关闭时被拒绝；`保持联网权限` 后返回 Bing 标题/链接/摘要；
+  - 符号引擎：`2x+3<7` → `x ∈ (-∞, 2)`，`x^2-4>=0` → `x ∈ (-∞, -2] ∪ [2, +∞)`，
+    `[1,3]+[2,4]` → `[3, 7]`，`sin(x)=0` 被拒绝为 syntax_invalid。
 - CPU-only 下模型加载约 1.1 s，生成 512 token 可正常完成；
 - `封装/models/AVA-main/` 是 AVA 训练/评测源码仓库（含占位 LFS 指针），
   不包含可加载的 GGUF；模型文件请使用 `models/AVA-v2-Q4_K_M.gguf`。
@@ -153,7 +156,8 @@ AiRuntime.exe --smoke chat     --input "计算 3 加 5 乘以 2 的结果"
 - 修复 `ai_inference.cpp`（原文件误粘贴了 C# 代码）并实现整批生成接口；
 - 补全 `keyword_tables.h`、`ai_keywords.cpp` 的时间/动作/实体三元组摘要；
 - `sympy_engine` 补上真正的中缀求值器与模板分发，统一 `sympy_free_string` 分配器；
-- 新增 `ai_inference.h`、`keyword_tables.h`、`generated/sympy_templates.c`、插件源码与 CMake；
+- 新增 `ai_inference.h`、`keyword_tables.h`、插件源码与 CMake；符号引擎改为
+  `generated/sympy_engine.cpp`（数值/区间/不等式求解）；
 - 显存检查改为告警而非硬性断言（参考水位 3072 MB）；默认全量层上卡，可用 `AI_GPU_LAYERS` 限制。
 - 修复确定性翻译器的双重自增：中文分隔符会吞掉后一个 token（"3 加 5" 只剩 "3"）；
 - 修复插件导出：插件源码未加 `/utf-8` 时按 GBK 解码中文注释，宏与 `dllexport` 声明被吞，
@@ -173,6 +177,9 @@ AiRuntime.exe --smoke chat     --input "计算 3 加 5 乘以 2 的结果"
   不再经模型改写；
 - 修复连续会话的长期记忆断档：压缩摘要现在实时回填 `ConversationSession`，
   下一轮提示词即可见；高层摘要会替换低层摘要，并按 token 预算优先保留高层/新近内容。
+- 新增 `web_search`（Bing，免密钥）托管工具，默认关闭，支持“保持/关闭联网权限”；
+- `sympy_engine` 改为 C++ 实现，覆盖任意数值中缀表达式、开闭区间运算、
+  单变量一次/二次等式与不等式求解，并拒绝超越方程、三次以上与变量分母。
 
 ## 9. 图像识别 / 语音识别与权限
 
@@ -182,6 +189,9 @@ AiRuntime.exe --smoke chat     --input "计算 3 加 5 乘以 2 的结果"
 |------|------|------|------|
 | `image_ocr` | Windows 自带 OCR（WinRT，离线） | `{"path":"C:\\...\\a.png"}` | `{"text":"...","lines":N,"language":"..."}` |
 | `speech_asr` | Windows 自带 SAPI 识别（离线） | `{"language":"zh-CN","timeout_ms":15000}` | `{"text":"...","culture":"zh-CN"}` |
+| `web_search` | Bing 网页搜索（HTTPS，免 API Key） | `{"query":"...","count":5}` | `{"query":"...","results":[...]}` |
+
+`web_search` 默认关闭；首次调用会询问权限，也可直接说“保持联网权限”开启。
 
 权限规则（`Security/ToolPermissionManager.cs`）：
 
@@ -193,7 +203,8 @@ AiRuntime.exe --smoke chat     --input "计算 3 加 5 乘以 2 的结果"
 聊天中可直接用命令管理：
 
 ```
-保持图像权限 / 关闭图像权限 / 保持语音权限 / 关闭语音权限 / 权限状态
+保持图像权限 / 关闭图像权限 / 保持语音权限 / 关闭语音权限
+保持联网权限 / 关闭联网权限 / 权限状态
 ```
 
 也可脱离 LLM 直接调用：
@@ -253,3 +264,27 @@ AiRuntime.exe --smoke chat     --input "计算 3 加 5 乘以 2 的结果"
 实测：权限 1 下写入被拒；权限 2 可写工作区内文件、越界写被拒；权限 3 可执行
 `echo`/`type` 等命令；`net session` 返回管理员权限提示与处理步骤；模型可通过
 “在 test.py 里写入 …”“执行命令 type test.py”自主完成写入与运行。
+
+## 12. 符号引擎覆盖范围
+
+`sympy_engine.dll` 已从“模板分发表”扩展为数值 + 区间 + 单变量约束求解：
+
+- **任意数值中缀表达式**：`+ - * / ^`、括号、隐式乘法（`2x`、`2(x+1)`）、
+  `sqrt/abs/exp/log/sin/cos/tan/pow/min/max`；`-2^2` 按 `-(2^2)` 计算；
+- **区间运算**：`[a,b]` 闭区间、`(a,b)` 开区间、`[a,b)` 混合；支持 `+ - * /`
+  与整数次幂，除法分母区间跨 0 时拒绝；
+- **等式/不等式求解**：单变量 `x`，一次/二次；输出根或区间，例如：
+
+```
+2x+3<7          -> x ∈ (-∞, 2)
+x^2-4>=0        -> x ∈ (-∞, -2] ∪ [2, +∞)
+x^2-5x+6=0      -> x = 2 或 x = 3
+[1,3]+[2,4]     -> [3, 7]
+(1,3)*(2,4)     -> (2, 12)
+```
+
+- **明确不支持**：超越方程（如 `sin(x)=0`）、三次及以上、变量出现在分母、
+  区间端点含变量、区间除法跨 0。这些情况返回 `syntax_invalid` 或明确错误，不会静默给出错误答案。
+
+中文输入可用 `解不等式 2x+3<7`、`解方程 x^2-5x+6=0`、`计算 [1,3]+[2,4]`，
+确定性翻译器会先去中文前缀再交给符号引擎。

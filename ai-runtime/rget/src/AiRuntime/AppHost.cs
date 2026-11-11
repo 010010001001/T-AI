@@ -58,6 +58,7 @@ internal sealed class AppHost : IDisposable
         {
             new ImageOcrTool(),
             new SpeechAsrTool(),
+            new WebSearchTool(),
             new WorkspaceFilesTool(Workspace),
             new WorkspaceEditTool(Workspace),
             new WorkspaceRunTool(Workspace)

@@ -1,0 +1,89 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- ============================================================
+       基本身份
+       ============================================================ -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>AiRuntime</AssemblyName>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <LangVersion>12.0</LangVersion>
+    <RootNamespace>AiRuntime</RootNamespace>
+
+    <!-- native DLL 为 x64；显式锁定平台，避免开发期 AnyCPU 误用 32 位调试器。
+         RuntimeIdentifier 不在此处设置，由 build_windows.ps1 的 dotnet publish 命令行传入。 -->
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+
+  <!-- ============================================================
+       语言特性
+       ============================================================ -->
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <!-- ============================================================
+       编译与诊断
+       ============================================================ -->
+  <PropertyGroup>
+    <AnalysisLevel>latest-minimal</AnalysisLevel>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <WarningLevel>8</WarningLevel>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <ErrorReport>none</ErrorReport>
+  </PropertyGroup>
+
+  <!-- ============================================================
+       发布形态
+       ============================================================ -->
+  <PropertyGroup>
+    <!-- 不在此处设置 RuntimeIdentifier / SelfContained：
+         日常 dotnet build 保持框架依赖（快）；
+         发布时由 build_windows.ps1 显式传 -r win-x64 自包含发布。
+         把 RID 写进 csproj 会让每次 build 都走 self-contained 路径，
+         构建变慢且下载 runtime pack，对开发无收益。 -->
+    <PublishSingleFile>false</PublishSingleFile>
+    <PublishTrimmed>false</PublishTrimmed>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <!-- ============================================================
+       运行时行为
+       ============================================================ -->
+  <PropertyGroup>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+  </PropertyGroup>
+
+  <!-- ============================================================
+       版本
+       ============================================================ -->
+  <PropertyGroup>
+    <Version>0.1.0</Version>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <FileVersion>0.1.0.0</FileVersion>
+    <InformationalVersion>0.1.0-dev</InformationalVersion>
+    <Product>AI Runtime</Product>
+  </PropertyGroup>
+
+  <!-- ============================================================
+       依赖
+       ============================================================ -->
+  <ItemGroup>
+    <!-- Microsoft.Data.Sqlite 默认 bundle 即 SQLitePCLRaw.bundle_e_sqlite3，
+         但显式引用 bundle 是为了锁定版本并确保 FTS5 可用。
+         e_sqlite3.dll 在 dotnet publish -r win-x64 时会自动复制到
+         AiRuntime.exe 同目录（不是 native/ 下）。 -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.10" />
+    <PackageReference Include="System.Speech" Version="8.0.0" />
+  </ItemGroup>
+
+</Project>

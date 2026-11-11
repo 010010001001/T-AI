@@ -1,0 +1,18 @@
+# 构建产物
+build/
+staging/
+*.zip
+bin/
+obj/
+
+# 第三方源码（按 README 用 git clone 获取）
+third_party/
+
+# 运行时数据与模型
+models/*.gguf
+ai-runtime/data/*.db
+ai-runtime/data/*.db-*
+
+# 日志
+smoke_logs/
+*.log
